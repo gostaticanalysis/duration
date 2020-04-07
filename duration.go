@@ -69,6 +69,9 @@ func run(pass *analysis.Pass) (interface{}, error) {
 		case *ast.Ident, *ast.SelectorExpr:
 			return false
 		case *ast.CallExpr:
+			if tv := pass.TypesInfo.Types[expr]; tv.Value != nil {
+				return false
+			}
 			for _, arg := range expr.Args {
 				tv := pass.TypesInfo.Types[arg]
 				if tv.Value != nil &&

@@ -31,6 +31,8 @@ func f() {
 	context.WithTimeout(context.Background(), i) // want `must not use untyped constant as a time\.Duration type`
 
 	(T{}).sleep(i) // want `must not use untyped constant as a time\.Duration type`
+
+	_ = time.Duration(10) // OK
 }
 
 type T struct{}
