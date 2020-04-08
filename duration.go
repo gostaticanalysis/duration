@@ -32,10 +32,14 @@ var Analyzer = &analysis.Analyzer{
 }
 
 var tmpl = template.Must(template.New("a.go").Parse(`package a
-import "time"
+import (
+{{- range .Pkgs}}
+	"{{.}}"
+{{end -}}
+)
 var _ time.Duration = 0 // dummy
 func f() {
-{{- range $i, $expr := .}}
+{{- range $i, $expr := .Exprs}}
 	var v{{$i}} = {{$expr}}
 	_ = v{{$i}}
 {{end -}}
@@ -51,8 +55,9 @@ func run(pass *analysis.Pass) (interface{}, error) {
 	}
 
 	var (
-		strExprs []string
-		exprPos  []token.Pos
+		strExprs   []string
+		exprPos    []token.Pos
+		importPkgs = []string{"time"}
 	)
 
 	inspect.Nodes(nil, func(n ast.Node, push bool) bool {
@@ -77,7 +82,9 @@ func run(pass *analysis.Pass) (interface{}, error) {
 				if tv.Value != nil &&
 					types.Identical(tv.Type, typDuration) {
 					exprPos = append(exprPos, arg.Pos())
-					strExprs = append(strExprs, exprToString(expandNamedConstAll(pass, arg)))
+					expandedExpr, pkgs := expandNamedConstAll(pass, arg)
+					strExprs = append(strExprs, exprToString(expandedExpr))
+					importPkgs = append(importPkgs, pkgs...)
 				}
 			}
 			return false
@@ -90,13 +97,16 @@ func run(pass *analysis.Pass) (interface{}, error) {
 		}
 
 		exprPos = append(exprPos, expr.Pos())
-		strExprs = append(strExprs, exprToString(expandNamedConstAll(pass, expr)))
+		expandedExpr, pkgs := expandNamedConstAll(pass, expr)
+		strExprs = append(strExprs, exprToString(expandedExpr))
+		importPkgs = append(importPkgs, pkgs...)
 
 		return false
 	})
 
 	var src bytes.Buffer
-	if err := tmpl.Execute(&src, strExprs); err != nil {
+	data := struct{ Exprs, Pkgs []string }{strExprs, stringSet(importPkgs)}
+	if err := tmpl.Execute(&src, data); err != nil {
 		return nil, err
 	}
 
@@ -179,14 +189,31 @@ func exprToString(expr ast.Expr) string {
 	return buf.String()
 }
 
-func expandNamedConstAll(pass *analysis.Pass, expr ast.Expr) ast.Expr {
+func expandNamedConstAll(pass *analysis.Pass, expr ast.Expr) (ast.Expr, []string) {
+	var pkgs []string
+
 	r, ok := astutil.Apply(expr, func(c *astutil.Cursor) bool {
 		switch n := c.Node().(type) {
 		case *ast.Ident:
+			obj := pass.TypesInfo.ObjectOf(n)
 			tv := pass.TypesInfo.Types[n]
 			if tv.Value != nil {
 				v := expandNamedConst(pass, tv.Value)
-				c.Replace(v)
+				switch t := obj.Type().(type) {
+				case *types.Named:
+					fun, err := parser.ParseExpr(t.String())
+					if err != nil {
+						return false
+					}
+					cast := &ast.CallExpr{
+						Fun:  fun,
+						Args: []ast.Expr{v},
+					}
+					c.Replace(cast)
+					pkgs = append(pkgs, t.Obj().Pkg().Path())
+				default:
+					c.Replace(v)
+				}
 			}
 			return false
 		}
@@ -194,10 +221,10 @@ func expandNamedConstAll(pass *analysis.Pass, expr ast.Expr) ast.Expr {
 	}, nil).(ast.Expr)
 
 	if ok {
-		return r
+		return r, pkgs
 	}
 
-	return nil
+	return nil, nil
 }
 
 func expandNamedConst(pass *analysis.Pass, cnst constant.Value) ast.Expr {
@@ -231,4 +258,17 @@ func expandNamedConst(pass *analysis.Pass, cnst constant.Value) ast.Expr {
 		}
 	}
 	return nil
+}
+
+// remove duplicated elements
+func stringSet(ss []string) []string {
+	m := map[string]bool{}
+	var set []string
+	for _, s := range ss {
+		if !m[s] {
+			set = append(set, s)
+		}
+		m[s] = true
+	}
+	return set
 }

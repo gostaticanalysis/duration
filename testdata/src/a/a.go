@@ -28,11 +28,15 @@ func f() {
 	const c = 2i * 2i
 	time.Sleep(10 + c) // want `must not use untyped constant as a time\.Duration type`
 
-	context.WithTimeout(context.Background(), i) // want `must not use untyped constant as a time\.Duration type`
+	const d3 = 7
+	context.WithTimeout(context.Background(), d3) // want `must not use untyped constant as a time\.Duration type`
 
 	(T{}).sleep(i) // want `must not use untyped constant as a time\.Duration type`
 
 	_ = time.Duration(10) // OK
+
+	const d4 = 8 * time.Second // OK
+	time.Sleep(d4)
 }
 
 type T struct{}
