@@ -1,5 +1,7 @@
 # duration
 
+This analyzer had been merged to [unitconst](https://github.com/gostaticanalysis/unitconst).
+
 [![godoc.org][godoc-badge]][godoc]
 
 `duration` finds using untyped constant as time.Duration.
